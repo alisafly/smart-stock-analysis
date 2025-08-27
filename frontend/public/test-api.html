@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>前端API连接测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .test-result { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        button { padding: 10px 15px; margin: 5px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #6c757d; cursor: not-allowed; }
+        textarea { width: 100%; height: 300px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 12px; }
+        .status-bar { background-color: #f8f9fa; padding: 10px; border: 1px solid #dee2e6; border-radius: 5px; margin-bottom: 20px; }
+        .loading { opacity: 0.7; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 前端API连接诊断工具</h1>
+        <p>此工具帮助诊断前端与后端AI服务的连接问题</p>
+        
+        <div class="status-bar">
+            <strong>测试环境：</strong>
+            <span id="environment">检测中...</span> | 
+            <strong>后端地址：</strong>
+            <span id="backend-url">http://localhost:3002/api</span>
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+            <button onclick="testAPIConnection()" id="btn-api">🔗 测试API连接</button>
+            <button onclick="testChatAPI()" id="btn-chat">💬 测试AI聊天</button>
+            <button onclick="testFullWorkflow()" id="btn-full">🚀 完整流程测试</button>
+            <button onclick="clearResults()">🗑️ 清除结果</button>
+        </div>
+        
+        <div id="results"></div>
+        
+        <h3>📋 详细测试日志：</h3>
+        <textarea id="logs" readonly placeholder="测试日志将在这里显示..."></textarea>
+    </div>
+
+    <script>
+        // 自动检测运行环境
+        const isFromVite = window.location.protocol === 'http:' && window.location.port === '5173';
+        const API_BASE_URL = isFromVite ? '/api' : 'http://localhost:3002/api';
+        
+        let logs = [];
+        let isLoading = false;
+
+        // 更新环境信息
+        document.getElementById('environment').textContent = isFromVite ? 
+            'Vite开发服务器 (推荐)' : 'File协议 (可能有CORS问题)';
+        document.getElementById('backend-url').textContent = API_BASE_URL;
+
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            const logMessage = `[${timestamp}] ${message}`;
+            logs.push(logMessage);
+            document.getElementById('logs').value = logs.join('\n');
+            document.getElementById('logs').scrollTop = document.getElementById('logs').scrollHeight;
+            console.log(logMessage);
+        }
+
+        function addResult(message, type = 'info') {
+            const resultsDiv = document.getElementById('results');
+            const resultDiv = document.createElement('div');
+            resultDiv.className = `test-result ${type}`;
+            resultDiv.textContent = message;
+            resultsDiv.appendChild(resultDiv);
+            log(message);
+        }
+
+        function setLoading(loading) {
+            isLoading = loading;
+            const buttons = document.querySelectorAll('button');
+            buttons.forEach(btn => {
+                btn.disabled = loading;
+                btn.classList.toggle('loading', loading);
+            });
+        }
+
+        async function testAPIConnection() {
+            log('开始测试基础API连接...');
+            setLoading(true);
+            
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+                
+                const response = await fetch(`${API_BASE_URL}/chat/status`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    addResult('✅ API连接成功', 'success');
+                    addResult(`AI提供商: ${data.aiService.provider}`, 'success');
+                    addResult(`AI可用: ${data.aiService.available}`, 'success');
+                    addResult(`当前模型: ${data.aiService.currentModel}`, 'success');
+                    addResult(`智谱AI客户端: ${data.aiService.clients.zhipu ? '已连接' : '未连接'}`, 
+                             data.aiService.clients.zhipu ? 'success' : 'error');
+                } else {
+                    const errorText = await response.text();
+                    addResult(`❌ API连接失败: ${response.status} ${response.statusText}`, 'error');
+                    log(`响应内容: ${errorText}`);
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    addResult('❌ API连接超时 (10秒)', 'error');
+                } else {
+                    addResult(`❌ API连接错误: ${error.message}`, 'error');
+                }
+                log(`详细错误: ${error.stack}`);
+                
+                // 提供诊断建议
+                if (error.message.includes('Failed to fetch')) {
+                    addResult('💡 诊断建议: 检查后端服务是否运行在 http://localhost:3002', 'info');
+                    if (!isFromVite) {
+                        addResult('💡 建议: 通过Vite开发服务器访问此页面 (http://localhost:5173/test-api.html)', 'info');
+                    }
+                }
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        async function testChatAPI() {
+            log('开始测试AI聊天API...');
+            setLoading(true);
+            
+            try {
+                const requestBody = {
+                    message: "你好，这是前端连接测试，请确认你使用的是GLM-4.5-Flash模型",
+                    stockContext: null,
+                    conversationId: Date.now().toString()
+                };
+
+                log(`发送请求: ${JSON.stringify(requestBody, null, 2)}`);
+
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+                const response = await fetch(`${API_BASE_URL}/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody),
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+                log(`收到响应状态: ${response.status}`);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    addResult('✅ AI聊天API调用成功', 'success');
+                    addResult(`AI提供商: ${data.aiProvider}`, 'success');
+                    addResult(`当前模型: ${data.aiServiceStatus?.currentModel || '未知'}`, 'success');
+                    addResult(`响应长度: ${data.response.length} 字符`, 'success');
+                    addResult(`响应预览: ${data.response.substring(0, 150)}...`, 'info');
+                    log(`完整AI响应: ${data.response}`);
+                } else {
+                    const errorText = await response.text();
+                    addResult(`❌ AI聊天API失败: ${response.status} ${response.statusText}`, 'error');
+                    log(`错误响应内容: ${errorText}`);
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    addResult('❌ AI聊天API超时 (30秒)', 'error');
+                } else {
+                    addResult(`❌ AI聊天API错误: ${error.message}`, 'error');
+                }
+                log(`详细错误: ${error.stack}`);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        async function testFullWorkflow() {
+            log('=== 开始完整流程测试 ===');
+            addResult('🚀 开始完整流程测试...', 'info');
+            
+            // 1. 测试API连接
+            await testAPIConnection();
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // 2. 测试聊天API
+            await testChatAPI();
+            
+            log('=== 完整流程测试结束 ===');
+            addResult('📋 流程测试完成，请查看上方结果', 'info');
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+            document.getElementById('logs').value = '';
+            logs = [];
+            log('测试结果已清除');
+        }
+
+        // 页面加载时的初始化
+        window.onload = function() {
+            log('页面加载完成，准备进行测试...');
+            if (isFromVite) {
+                log('✅ 检测到通过Vite开发服务器访问，CORS问题已解决');
+                addResult('✅ 运行环境: Vite开发服务器 (无CORS问题)', 'success');
+            } else {
+                log('⚠️ 检测到通过file://协议访问，可能存在CORS问题');
+                addResult('⚠️ 运行环境: File协议 (可能有CORS限制)', 'error');
+                addResult('💡 建议: 请通过 http://localhost:5173 访问前端应用', 'info');
+            }
+            
+            // 自动开始基础测试
+            setTimeout(() => {
+                if (!isLoading) {
+                    testAPIConnection();
+                }
+            }, 1000);
+        };
+    </script>
+</body>
+</html>
