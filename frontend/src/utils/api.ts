@@ -7,7 +7,9 @@ import axios from 'axios';
 
 // API基础配置
 // 使用相对路径启用Vite代理，解决CORS问题
-const API_BASE_URL = '/api';
+const API_BASE_URL = process.env.NODE_ENV === 'production' 
+  ? process.env.REACT_APP_API_URL || 'https://your-backend-url.vercel.app/api' 
+  : '/api';
 
 // 创建axios实例
 const apiClient = axios.create({

@@ -27639,175 +27639,142 @@ NODE_ENV=production npm start
 ⭐ 如果这个项目对您有帮助，请给个Star支持一下！
 ### 2. AI智能分析组件 (ChatPanel.tsx)# 📈 智能股票分析平台 (gupiao2)
 
-一个基于AI大模型的智能金融分析平台，支持股票数据可视化和AI驱动的投资分析。
+一个基于React和Node.js的智能金融分析平台，提供股票数据可视化和AI辅助投资建议。
 
-## ✨ 功能特色
+## 项目概述
 
-- 📊 **股票数据可视化**: 支持多只股票的价格走势图表展示
-- 🤖 **AI智能分析**: 集成多种大模型（智谱AI、OpenAI等）进行专业股票分析
-- 🔄 **多模型切换**: 支持动态切换不同AI模型，包括本地LMStudio
-- 📱 **响应式设计**: 适配移动端和桌面端的现代化界面
-- ⚡ **实时交互**: 基于股票数据的上下文感知AI对话
+gupiao2 是一个智能金融分析平台的MVP版本，旨在通过数据可视化和AI分析帮助用户进行股票投资决策。项目结合前端交互与后端服务，提供直观的股票走势展示和智能化的投资建议。
 
-## 🏗️ 技术架构
+## 技术栈
 
-### 前端技术栈
-- **React 18** + TypeScript
-- **Vite** - 快速开发构建工具
-- **Tailwind CSS** - 现代化样式框架
-- **Chart.js** + react-chartjs-2 - 数据可视化
-- **Axios** - HTTP客户端
+### 前端
+- React 18
+- TypeScript
+- Tailwind CSS
+- ECharts + echarts-for-react
+- axios
+- Vite
 
-### 后端技术栈
-- **Node.js** + Express
-- **多AI模型集成**:
-  - 智谱AI (GLM-4.5-Flash)
-  - OpenAI GPT系列
-  - 月之暗面Kimi
-  - DeepSeek
-  - Claude
-  - LMStudio本地模型
-- **CORS** + **代理配置**
+### 后端
+- Node.js + Express
+- Python (akshare库用于获取股票数据)
 
-## 🚀 快速开始
+## 本地开发
 
 ### 环境要求
 - Node.js 16+
 - npm 8+
+- Python 3.7+
 - 现代浏览器
 
-### 1. 克隆项目
-```bash
-git clone https://github.com/yourusername/gupiao2.git
-cd gupiao2
-```
+### 安装依赖
 
-### 2. 安装依赖
 ```bash
+# 安装前端依赖
+cd frontend
+npm install
+
 # 安装后端依赖
 cd backend
 npm install
 
-# 安装前端依赖
-cd ../frontend
-npm install
+# 安装Python依赖
+pip install akshare pandas lxml html5lib
 ```
 
-### 3. 配置环境变量
+### 启动服务
+
 ```bash
-# 复制环境变量模板
-cp backend/.env.example backend/.env
-```
-
-编辑 `backend/.env` 文件，配置AI服务：
-```env
-# AI服务提供商选择
-AI_PROVIDER=zhipu
-
-# 智谱AI配置
-ZHIPU_API_KEY=your_zhipu_api_key_here
-ZHIPU_MODEL=GLM-4.5-Flash
-
-# 其他AI服务配置...
-```
-
-### 4. 启动服务
-
-**启动后端服务**（端口3002）：
-```bash
+# 启动后端服务
 cd backend
 npm run dev
-```
 
-**启动前端服务**（端口5173）：
-```bash
-# 新开终端窗口
+# 启动前端服务（另开终端）
 cd frontend
 npm run dev
 ```
 
-### 5. 访问应用
-打开浏览器访问：http://localhost:5173
+## 部署到Vercel
 
-## 🔧 AI模型配置
+### 前端部署
 
-### 支持的AI服务
+1. 在Vercel控制台导入项目
+2. 配置环境变量：
+   ```
+   REACT_APP_API_URL=https://your-backend-url.vercel.app
+   ```
+3. 构建设置：
+   - 构建命令: `npm run build`
+   - 输出目录: `dist`
 
-| 服务商 | 模型 | 配置说明 |
-|--------|------|----------|
-| 智谱AI | GLM-4.5-Flash | 推荐用于中文金融分析 |
-| OpenAI | GPT系列 | 支持自定义API地址 |
-| 月之暗面 | Kimi | 擅长长文本处理 |
-| DeepSeek | deepseek-chat | 代码和逻辑分析能力强 |
-| LMStudio | 本地模型 | 隐私安全的本地部署 |
+### 后端部署
 
-### 动态切换模型
-```bash
-# 通过API切换到智谱AI
-curl -X POST http://localhost:3002/api/chat/switch \
-  -H "Content-Type: application/json" \
-  -d '{"provider": "zhipu"}'
+由于Vercel主要是静态网站托管平台，对于Node.js后端服务，可以选择以下方案之一：
+
+1. **部署到Vercel Serverless Functions**：
+   - 将API接口转换为Vercel Functions
+   - 在`api/`目录下创建对应的函数文件
+
+2. **部署到其他平台**：
+   - Heroku
+   - Railway
+   - AWS Lambda
+   - Google Cloud Functions
+
+## 环境变量配置
+
+### 前端环境变量
+```
+REACT_APP_API_URL=http://localhost:3002  # 开发环境
+REACT_APP_API_URL=https://your-backend-url.vercel.app  # 生产环境
 ```
 
-### 获取API密钥
-- [智谱AI开放平台](https://open.bigmodel.cn/)
-- [月之暗面API](https://platform.moonshot.cn/)
-- [DeepSeek开放平台](https://platform.deepseek.com/)
-
-## 📊 使用说明
-
-### 股票数据查询
-1. 在左侧输入股票代码（如：000001、600036）
-2. 选择查询时间范围
-3. 查看股票价格走势图
-
-### AI智能分析
-1. 确保已配置AI服务
-2. 在右侧聊天面板提问
-3. AI会基于当前股票数据进行分析
-
-### 推荐问题示例
-- "这只股票的趋势如何？"
-- "现在适合买入吗？"
-- "请分析一下技术指标"
-- "有什么投资风险？"
-
-## 🛠️ 开发指南
-
-### 项目结构
+### 后端环境变量
 ```
-gupiao2/
-├── frontend/          # React前端应用
+PORT=3002
+NODE_ENV=development
+FRONTEND_URL=http://localhost:5173
+ZHIPU_API_KEY=your_zhipu_api_key
+ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+```
+
+## 项目结构
+
+```
+.
+├── frontend/                 # React前端应用
 │   ├── src/
-│   │   ├── components/    # UI组件
-│   │   │   ├── StockChart.tsx     # 股票图表
-│   │   │   ├── ChatPanel.tsx      # AI对话面板
-│   │   │   └── ...
-│   │   └── utils/
-│   │       └── api.ts             # API封装
-│   └── vite.config.ts             # Vite配置
-├── backend/           # Node.js后端服务
-│   ├── routes/
-│   │   ├── stock.js               # 股票数据API
-│   │   └── chat.js                # AI聊天API
-│   ├── services/
-│   │   └── aiService.js           # AI服务管理
-│   ├── server.js                  # 服务器入口
-│   └── .env                       # 环境配置
-└── README.md
+│   │   ├── components/       # 核心UI组件
+│   │   ├── utils/            # 工具函数
+│   │   └── App.tsx           # 主应用组件
+│   └── vite.config.ts        # Vite配置
+├── backend/                  # Node.js后端服务
+│   ├── routes/               # API路由
+│   ├── services/             # 业务逻辑
+│   ├── data_service.py       # Python数据服务
+│   └── server.js             # Express服务器入口
+└── api/                      # Vercel Serverless Functions
 ```
 
-### API接口
+## 功能特性
 
-#### 股票数据API
-```
-GET /api/stock/:code/:startDate/:endDate
-```
+- 股票价格走势图表展示（支持多只股票）
+- 基于时间范围的历史数据查询
+- AI驱动的投资建议与风险评估
+- 响应式界面设计，适配移动端和桌面端
+- 支持股票和指数数据查询
+- 实时数据获取和展示
 
-#### AI聊天API
-```
-POST /api/chat
-{
+## 已知问题
+
+- 当前为MVP版本，股票数据为模拟数据
+- 未集成真实金融数据API，数据真实性受限
+- AI分析基于模拟数据，实际投资建议需谨慎参考
+
+## 贡献
+
+欢迎提交Issue和Pull Request来改进项目。
+
   "message": "用户问题",
   "stockContext": { /* 股票数据上下文 */ }
 }
