@@ -15,6 +15,7 @@ import StockChart from './components/StockChart';
 import ChatPanel from './components/ChatPanel';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoadingSpinner from './components/LoadingSpinner';
+import ResizableLayout from './components/ResizableLayout';
 
 // 股票数据接口定义
 interface StockData {
@@ -148,40 +149,27 @@ function App() {
           )}
           
           {/* 主要内容布局 */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-140px)]">
-            {/* 左侧：股票图表区域 (占2/3宽度) */}
-            <div className="lg:col-span-2">
-              <StockChart
-                onStockDataUpdate={handleStockDataUpdate}
-                onLoadingChange={handleLoadingChange}
-                onError={handleError}
-              />
-            </div>
-            
-            {/* 右侧：AI对话区域 (占1/3宽度) */}
-            <div className="lg:col-span-1">
-              <ChatPanel
-                stockContext={appState.currentStockData}
-                onError={handleError}
-              />
-            </div>
+          <div className="h-[calc(100vh-140px)]">
+            <ResizableLayout
+              leftPanel={
+                <StockChart
+                  onStockDataUpdate={handleStockDataUpdate}
+                  onLoadingChange={handleLoadingChange}
+                  onError={handleError}
+                />
+              }
+              rightPanel={
+                <ChatPanel
+                  stockContext={appState.currentStockData}
+                  onError={handleError}
+                />
+              }
+              defaultLeftWidth={65}
+              minLeftWidth={35}
+              maxLeftWidth={80}
+            />
           </div>
         </main>
-        
-        {/* 底部信息 */}
-        <footer className="bg-white border-t border-gray-200 py-4">
-          <div className="container mx-auto px-4">
-            <div className="flex flex-col sm:flex-row justify-between items-center text-sm text-gray-600">
-              <div>
-                <span>智能金融分析平台 MVP v1.0</span>
-                <span className="ml-4">当前版本：开发版</span>
-              </div>
-              <div className="mt-2 sm:mt-0">
-                <span>数据更新时间：{new Date().toLocaleString('zh-CN')}</span>
-              </div>
-            </div>
-          </div>
-        </footer>
       </div>
     </ErrorBoundary>
   );

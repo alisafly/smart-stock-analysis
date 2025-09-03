@@ -27,8 +27,21 @@ const PORT = process.env.PORT || 5000;
  * - express.json: 解析JSON请求体
  * - express.static: 服务静态文件
  */
+// 添加更完善的CORS配置以解决跨域问题
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+  } else {
+    next();
+  }
+});
+
+// 保留原有的cors中间件作为备用
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',  // 修正为正确的Vite端口
+    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
     credentials: true
 }));
 

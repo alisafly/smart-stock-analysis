@@ -12,35 +12,38 @@
  * 8. 响应式图表设计
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import ReactEChartsCore from 'echarts-for-react/lib/core';
+import * as echarts from 'echarts/core';
 import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  TimeScale,
-} from 'chart.js';
-import { Line } from 'react-chartjs-2';
-import 'chartjs-adapter-date-fns';
+  CandlestickChart,
+  BarChart,
+  LineChart
+} from 'echarts/charts';
+import {
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+  DataZoomComponent,
+  TitleComponent
+} from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
 import { stockAPI } from '../utils/api';
 import { getDefaultDateRange, formatDate } from '../utils/dateUtils';
 import LoadingSpinner from './LoadingSpinner';
 
-// 注册Chart.js组件
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  TimeScale
-);
+// 注册ECharts组件
+echarts.use([
+  CandlestickChart,
+  BarChart,
+  LineChart,
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+  DataZoomComponent,
+  TitleComponent,
+  CanvasRenderer
+]);
 
 // 常用指数快速选择配置
 const POPULAR_INDICES = [
@@ -113,6 +116,22 @@ const getColorTheme = (symbolType: string, code: string) => {
   }
 };
 
+/**
+ * 计算移动平均线
+ */
+const calculateMA = (data: any[], period: number): number[] => {
+  const result: number[] = [];
+  for (let i = 0; i < data.length; i++) {
+    if (i < period - 1) {
+      result.push(null as any);
+    } else {
+      const sum = data.slice(i - period + 1, i + 1).reduce((acc, item) => acc + item.close, 0);
+      result.push(sum / period);
+    }
+  }
+  return result;
+};
+
 const StockChart: React.FC<StockChartProps> = ({
   onStockDataUpdate,
   onLoadingChange,
@@ -122,9 +141,62 @@ const StockChart: React.FC<StockChartProps> = ({
   const [stockCode, setStockCode] = useState('000001'); // 默认平安银行
   const [dateRange, setDateRange] = useState(getDefaultDateRange());
   const [stockData, setStockData] = useState<any>(null);
+  const [realtimeData, setRealtimeData] = useState<any>(null); // 实时数据
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'stock' | 'index'>('stock'); // 当前活跃的标签页
   const [searchHistory, setSearchHistory] = useState<string[]>([]); // 搜索历史
+  const [autoRefresh, setAutoRefresh] = useState(false); // 是否自动刷新
+  const [lastUpdate, setLastUpdate] = useState<string>(''); // 最后更新时间
+  const [containerHeight, setContainerHeight] = useState(600); // 容器高度
+  
+  // 引用
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  
+  // MA显示控制
+  const [showMA, setShowMA] = useState({
+    MA5: true,
+    MA10: true,
+    MA20: true
+  });
+
+  /**
+   * 获取实时数据
+   * 支持股票和指数的实时数据获取
+   */
+  const fetchRealtimeData = useCallback(async () => {
+    if (!stockCode) return;
+    
+    const symbolType = identifySymbolType(stockCode);
+    if (symbolType === 'unknown') return; // 只支持有效的股票和指数代码
+    
+    try {
+      const data = await stockAPI.getRealtimeData(stockCode);
+      if (data.success) {
+        setRealtimeData(data);
+        setLastUpdate(new Date().toLocaleTimeString('zh-CN'));
+      }
+    } catch (error) {
+      // 实时数据获取失败不显示错误，不影响主要功能
+      console.warn('获取实时数据失败:', error);
+    }
+  }, [stockCode]);
+
+  // 自动刷新实时数据
+  useEffect(() => {
+    if (!autoRefresh) return;
+    
+    const symbolType = identifySymbolType(stockCode);
+    if (symbolType === 'unknown') return; // 只支持有效的股票和指数代码
+    
+    // 立即获取一次实时数据
+    fetchRealtimeData();
+    
+    // 设置定时器，每30秒更新一次
+    const interval = setInterval(fetchRealtimeData, 30000);
+    
+    return () => clearInterval(interval);
+  }, [autoRefresh, stockCode, fetchRealtimeData]);
 
   /**
    * 获取股票/指数数据 - 增强版
@@ -234,216 +306,336 @@ const StockChart: React.FC<StockChartProps> = ({
   };
 
   /**
-   * 准备图表数据 - 增强版
-   * 支持股票和指数的差异化展示
+   * 准备ECharts K线图配置
    */
-  const chartData = useMemo(() => {
+  const chartOption = useMemo(() => {
     if (!stockData?.data || stockData.data.length === 0) {
-      return {
-        labels: [],
-        datasets: []
-      };
+      return {};
     }
 
+    const data = stockData.data;
+    const dates = data.map((item: any) => item.date);
+    const ohlcData = data.map((item: any) => [
+      item.open,
+      item.close,
+      item.low,
+      item.high
+    ]);
+    const volumes = data.map((item: any) => item.volume);
+
+    // 计算移动平均线
+    const ma5 = calculateMA(data, 5);
+    const ma10 = calculateMA(data, 10);
+    const ma20 = calculateMA(data, 20);
+
     const symbolType = identifySymbolType(stockData.code);
-    const colorTheme = getColorTheme(symbolType, stockData.code);
+    const isIndex = symbolType === 'index';
 
     return {
-      labels: stockData.data.map((item: any) => item.date),
-      datasets: [
+      title: {
+        text: `${stockData.name} (${stockData.code}) - ${isIndex ? '指数走势' : 'K线图'}`,
+        left: 'center',
+        textStyle: {
+          color: '#333',
+          fontSize: 16,
+          fontWeight: 'bold'
+        }
+      },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: {
+          type: 'cross',
+          lineStyle: {
+            color: '#cccccc'
+          }
+        },
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        borderColor: '#333',
+        borderWidth: 1,
+        textStyle: {
+          color: '#fff'
+        },
+        formatter: function (params: any) {
+          const dataIndex = params[0].dataIndex;
+          const item = data[dataIndex];
+          const date = item.date;
+          
+          let tooltip = `<div style="margin: 0px; padding: 0px;">`;
+          tooltip += `<div style="margin: 0px; padding: 4px 0; font-weight: bold; color: #fff;">${date}</div>`;
+          tooltip += `<div style="margin: 0px; padding: 2px 0;">开盘: <span style="color: #ffa500;">${item.open.toFixed(2)}</span></div>`;
+          tooltip += `<div style="margin: 0px; padding: 2px 0;">收盘: <span style="color: ${item.close >= item.open ? '#ff4757' : '#2ed573'}">${item.close.toFixed(2)}</span></div>`;
+          tooltip += `<div style="margin: 0px; padding: 2px 0;">最高: <span style="color: #ff4757;">${item.high.toFixed(2)}</span></div>`;
+          tooltip += `<div style="margin: 0px; padding: 2px 0;">最低: <span style="color: #2ed573;">${item.low.toFixed(2)}</span></div>`;
+          if (item.volume > 0) {
+            tooltip += `<div style="margin: 0px; padding: 2px 0;">成交量: <span style="color: #70a1ff;">${(item.volume / 10000).toFixed(0)}万</span></div>`;
+          }
+          
+          // 显示MA数据
+          if (showMA.MA5 && ma5[dataIndex] !== null) {
+            tooltip += `<div style="margin: 0px; padding: 2px 0;">MA5: <span style="color: #ff6b6b;">${ma5[dataIndex].toFixed(2)}</span></div>`;
+          }
+          if (showMA.MA10 && ma10[dataIndex] !== null) {
+            tooltip += `<div style="margin: 0px; padding: 2px 0;">MA10: <span style="color: #4ecdc4;">${ma10[dataIndex].toFixed(2)}</span></div>`;
+          }
+          if (showMA.MA20 && ma20[dataIndex] !== null) {
+            tooltip += `<div style="margin: 0px; padding: 2px 0;">MA20: <span style="color: #45b7d1;">${ma20[dataIndex].toFixed(2)}</span></div>`;
+          }
+          
+          tooltip += `</div>`;
+          return tooltip;
+        }
+      },
+      legend: {
+        data: ['K线图', 'MA5', 'MA10', 'MA20', '成交量'],
+        left: 'left',
+        top: 30
+      },
+      grid: [
         {
-          label: `${symbolType === 'index' ? '指数点位' : '收盘价'}`,
-          data: stockData.data.map((item: any) => ({
-            x: item.date,
-            y: item.close
-          })),
-          borderColor: colorTheme.line,
-          backgroundColor: colorTheme.background,
-          borderWidth: 2,
-          fill: true,
-          tension: 0.1,
-          pointRadius: 0,
-          pointHoverRadius: 4,
-          pointHoverBackgroundColor: colorTheme.line,
-          pointHoverBorderColor: '#ffffff',
-          pointHoverBorderWidth: 2,
+          left: '8%',
+          right: '8%',
+          top: '15%',
+          height: '60%',
+          containLabel: true
+        },
+        {
+          left: '8%',
+          right: '8%',
+          top: '78%',
+          height: '15%',
+          containLabel: true
+        }
+      ],
+      xAxis: [
+        {
+          type: 'category',
+          data: dates,
+          scale: true,
+          boundaryGap: false,
+          axisLine: { onZero: false },
+          splitLine: { show: false },
+          splitNumber: 20,
+          min: 'dataMin',
+          max: 'dataMax'
+        },
+        {
+          type: 'category',
+          gridIndex: 1,
+          data: dates,
+          scale: true,
+          boundaryGap: false,
+          axisLine: { onZero: false },
+          axisTick: { show: false },
+          splitLine: { show: false },
+          axisLabel: { show: false },
+          splitNumber: 20,
+          min: 'dataMin',
+          max: 'dataMax'
+        }
+      ],
+      yAxis: [
+        {
+          scale: true,
+          splitArea: {
+            show: true
+          }
+        },
+        {
+          scale: true,
+          gridIndex: 1,
+          splitNumber: 2,
+          axisLabel: { show: false },
+          axisLine: { show: false },
+          axisTick: { show: false },
+          splitLine: { show: false }
+        }
+      ],
+      dataZoom: [
+        {
+          type: 'inside',
+          xAxisIndex: [0, 1],
+          start: 0,
+          end: 100,
+          minSpan: 10
+        },
+        {
+          show: true,
+          xAxisIndex: [0, 1],
+          type: 'slider',
+          top: '95%',
+          start: 0,
+          end: 100,
+          minSpan: 10
+        }
+      ],
+      series: [
+        // K线图
+        {
+          name: 'K线图',
+          type: 'candlestick',
+          data: ohlcData,
+          itemStyle: {
+            color: '#ff4757', // 阳线颜色（红色）
+            color0: '#2ed573', // 阴线颜色（绿色）
+            borderColor: '#ff4757', // 阳线边框
+            borderColor0: '#2ed573' // 阴线边框
+          },
+          emphasis: {
+            itemStyle: {
+              color: '#ff6b6b',
+              color0: '#26de81',
+              borderColor: '#ff6b6b',
+              borderColor0: '#26de81'
+            }
+          }
+        },
+        // MA5
+        ...(showMA.MA5 ? [{
+          name: 'MA5',
+          type: 'line',
+          data: ma5,
+          smooth: true,
+          symbol: 'none',
+          lineStyle: {
+            color: '#ff6b6b',
+            width: 1
+          }
+        }] : []),
+        // MA10
+        ...(showMA.MA10 ? [{
+          name: 'MA10',
+          type: 'line',
+          data: ma10,
+          smooth: true,
+          symbol: 'none',
+          lineStyle: {
+            color: '#4ecdc4',
+            width: 1
+          }
+        }] : []),
+        // MA20
+        ...(showMA.MA20 ? [{
+          name: 'MA20',
+          type: 'line',
+          data: ma20,
+          smooth: true,
+          symbol: 'none',
+          lineStyle: {
+            color: '#45b7d1',
+            width: 1
+          }
+        }] : []),
+        // 成交量
+        {
+          name: '成交量',
+          type: 'bar',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: volumes.map((vol: number, index: number) => ({
+            value: vol,
+            itemStyle: {
+              color: data[index].close >= data[index].open ? '#ff4757' : '#2ed573'
+            }
+          }))
         }
       ]
     };
-  }, [stockData]);
+  }, [stockData, showMA]);
 
-  /**
-   * 图表配置选项 - 增强版
-   * 优化了显示效果和交互体验
-   */
-  const chartOptions = useMemo(() => {
-    const symbolType = stockData ? identifySymbolType(stockData.code) : 'stock';
-    const isIndex = symbolType === 'index';
-    
-    return {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          position: 'top' as const,
-          labels: {
-            usePointStyle: true,
-            padding: 20,
-          }
-        },
-        title: {
-          display: true,
-          text: stockData ? 
-            `${stockData.name} (${stockData.code}) - ${isIndex ? '指数走势' : '股价走势'}` : 
-            '请选择股票或指数',
-          font: {
-            size: 16,
-            weight: 'bold' as const
-          },
-          padding: {
-            bottom: 20
-          }
-        },
-        tooltip: {
-          mode: 'index' as const,
-          intersect: false,
-          backgroundColor: 'rgba(0, 0, 0, 0.8)',
-          titleColor: '#ffffff',
-          bodyColor: '#ffffff',
-          borderColor: '#e5e7eb',
-          borderWidth: 1,
-          cornerRadius: 8,
-          displayColors: true,
-          callbacks: {
-            title: (context: any) => {
-              const date = new Date(context[0].label);
-              return `日期: ${date.toLocaleDateString('zh-CN', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-                weekday: 'long'
-              })}`;
-            },
-            label: (context: any) => {
-              const value = context.parsed.y;
-              const unit = isIndex ? '点' : '元';
-              return `${context.dataset.label}: ${value.toFixed(2)}${unit}`;
-            },
-            afterLabel: (context: any) => {
-              if (stockData?.data && context.dataIndex > 0) {
-                const current = context.parsed.y;
-                const previous = stockData.data[context.dataIndex - 1]?.close;
-                if (previous) {
-                  const change = current - previous;
-                  const changePercent = (change / previous * 100).toFixed(2);
-                  const changeText = change >= 0 ? `+${change.toFixed(2)}` : change.toFixed(2);
-                  const percentText = change >= 0 ? `+${changePercent}%` : `${changePercent}%`;
-                  return `日变动: ${changeText} (${percentText})`;
-                }
-              }
-              return undefined;
-            }
-          }
-        }
-      },
-      scales: {
-        x: {
-          type: 'time' as const,
-          time: {
-            unit: 'day' as const,
-            displayFormats: {
-              day: 'MM-dd'
-            }
-          },
-          title: {
-            display: true,
-            text: '日期',
-            font: {
-              size: 12,
-              weight: 'bold' as const
-            }
-          },
-          grid: {
-            color: '#f3f4f6',
-            lineWidth: 1
-          }
-        },
-        y: {
-          title: {
-            display: true,
-            text: isIndex ? '指数点位' : '价格 (元)',
-            font: {
-              size: 12,
-              weight: 'bold' as const
-            }
-          },
-          grid: {
-            color: '#f3f4f6',
-            lineWidth: 1
-          },
-          ticks: {
-            callback: function(value: any) {
-              const unit = isIndex ? '点' : '元';
-              return `${Number(value).toFixed(2)}${unit}`;
-            }
-          }
-        }
-      },
-      interaction: {
-        mode: 'nearest' as const,
-        axis: 'x' as const,
-        intersect: false
-      },
-      animation: {
-        duration: 1000,
-        easing: 'easeOutQuart' as const
+  // 监听容器大小变化，动态调整图表高度
+  useEffect(() => {
+    const updateContainerHeight = () => {
+      if (containerRef.current && chartContainerRef.current) {
+        const containerRect = containerRef.current.getBoundingClientRect();
+        const chartContainerRect = chartContainerRef.current.getBoundingClientRect();
+        
+        // 计算可用高度：窗口高度 - 容器顶部位置 - 底部边距
+        const availableHeight = window.innerHeight - chartContainerRect.top - 60;
+        const minHeight = 400; // 最小高度
+        const maxHeight = Math.max(600, availableHeight * 0.8); // 最大高度，至少600px
+        
+        const newHeight = Math.max(minHeight, Math.min(maxHeight, availableHeight));
+        setContainerHeight(newHeight);
+        
+        console.log('图表高度计算:', {
+          windowHeight: window.innerHeight,
+          chartTop: chartContainerRect.top,
+          availableHeight,
+          newHeight
+        });
       }
     };
-  }, [stockData]);
+
+    // 初始化时延迟计算高度，确保DOM已渲染
+    const initHeight = () => {
+      setTimeout(updateContainerHeight, 100);
+    };
+
+    // 监听窗口大小变化
+    const handleResize = () => {
+      // 防抖处理
+      setTimeout(updateContainerHeight, 150);
+    };
+
+    // 初始化
+    initHeight();
+    window.addEventListener('resize', handleResize);
+    
+    // 使用 ResizeObserver 监听容器大小变化（如左侧面板宽度改变）
+    let resizeObserver: ResizeObserver | null = null;
+    if (window.ResizeObserver) {
+      const observeResize = () => {
+        if (containerRef.current) {
+          resizeObserver = new ResizeObserver(() => {
+            setTimeout(updateContainerHeight, 100);
+          });
+          resizeObserver.observe(containerRef.current);
+        }
+      };
+      
+      setTimeout(observeResize, 200); // 延迟观察，确保DOM稳定
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (resizeObserver && containerRef.current) {
+        resizeObserver.unobserve(containerRef.current);
+      }
+    };
+  }, [stockData]); // 当stockData变化时也重新计算
 
   return (
-    <div className="card h-full flex flex-col">
-      {/* 头部控制面板 */}
-      <div className="mb-6">
-        {/* 标签页切换 */}
-        <div className="flex items-center justify-between mb-4">
+    <div ref={containerRef} className="card h-full flex flex-col overflow-hidden">
+      {/* 头部控制面板 - 优化布局，减少垂直空间占用 */}
+      <div className="flex-shrink-0 mb-4">
+        {/* 标签页切换 - 简化布局 */}
+        <div className="flex items-center justify-between mb-3">
           <div className="flex bg-gray-100 rounded-lg p-1">
             <button
               onClick={() => setActiveTab('stock')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
                 activeTab === 'stock'
                   ? 'bg-white text-primary-600 shadow-sm'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <span className="flex items-center">
-                <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" />
-                </svg>
-                股票查询
-              </span>
+              股票查询
             </button>
             <button
               onClick={() => setActiveTab('index')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
                 activeTab === 'index'
                   ? 'bg-white text-primary-600 shadow-sm'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <span className="flex items-center">
-                <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11.707 4.707a1 1 0 00-1.414-1.414L10 9.586 8.707 8.293a1 1 0 00-1.414 0l-2 2a1 1 0 101.414 1.414L8 10.414l1.293 1.293a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                </svg>
-                指数查询
-              </span>
+              指数查询
             </button>
           </div>
           
           {/* 当前查询类型显示 */}
           {stockData && (
             <div className="flex items-center text-sm text-gray-600">
-              <span className="mr-2">当前类型：</span>
               <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                 stockData.type === 'index' 
                   ? 'bg-red-100 text-red-800' 
@@ -455,177 +647,140 @@ const StockChart: React.FC<StockChartProps> = ({
           )}
         </div>
 
-        {/* 代码输入和搜索 */}
-        <div className="flex flex-col sm:flex-row gap-4 mb-4">
-          <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              {activeTab === 'stock' ? '股票代码' : '指数代码'}
-            </label>
-            <div className="flex gap-2">
+        {/* 代码输入和控制 - 紧凑布局 */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-3">
+          {/* 左列：代码输入和快速选择 */}
+          <div>
+            <div className="flex gap-2 mb-2">
               <input
                 type="text"
                 value={stockCode}
                 onChange={handleStockCodeChange}
-                className="input flex-1"
-                placeholder={activeTab === 'stock' ? '请输入股票代码，如：000001' : '请输入指数代码，如：000001.SH'}
+                className="input flex-1 text-sm"
+                placeholder={activeTab === 'stock' ? '股票代码，如：000001' : '指数代码，如：000001.SH'}
                 maxLength={10}
               />
               <button
                 onClick={fetchStockData}
                 disabled={isLoading}
-                className="btn btn-primary whitespace-nowrap"
+                className="btn btn-primary text-sm px-3 py-1 whitespace-nowrap"
               >
-                {isLoading ? '查询中...' : '查询'}
+                {isLoading ? '查询中' : '查询'}
               </button>
             </div>
-          </div>
-        </div>
-
-        {/* 快速选择按钮 */}
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            {activeTab === 'stock' ? '常用股票' : '主要指数'}
-          </label>
-          <div className="flex flex-wrap gap-2">
-            {(activeTab === 'stock' ? POPULAR_STOCKS : POPULAR_INDICES).map((item) => (
-              <button
-                key={item.code}
-                onClick={() => handleQuickSelect(item.code, activeTab)}
-                className={`px-3 py-1 text-xs rounded-full transition-colors ${
-                  stockCode === item.code
-                    ? activeTab === 'stock'
-                      ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                      : 'bg-red-100 text-red-800 border border-red-200'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <span className="font-medium">{item.code}</span>
-                <span className="ml-1">{item.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 日期范围选择 */}
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex items-center gap-2">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                开始日期
-              </label>
-              <input
-                type="date"
-                value={dateRange.startDate}
-                onChange={handleDateRangeChange('startDate')}
-                className="input w-36"
-              />
-            </div>
-            <span className="text-gray-500 mt-6">至</span>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                结束日期
-              </label>
-              <input
-                type="date"
-                value={dateRange.endDate}
-                onChange={handleDateRangeChange('endDate')}
-                className="input w-36"
-              />
-            </div>
-          </div>
-          
-          {/* 快速日期选择 */}
-          <div className="flex items-end gap-2">
-            {[7, 30, 90, 180].map((days) => (
-              <button
-                key={days}
-                onClick={() => handlePresetDateRange(days)}
-                className="btn btn-secondary text-xs px-3 py-1 h-fit"
-              >
-                近{days}天
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 搜索历史 */}
-        {searchHistory.length > 0 && (
-          <div className="mt-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              最近查询
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {searchHistory.map((code, index) => (
+            {/* 快速选择按钮 - 紧凑显示 */}
+            <div className="flex flex-wrap gap-1">
+              {(activeTab === 'stock' ? POPULAR_STOCKS : POPULAR_INDICES).slice(0, 3).map((item) => (
                 <button
-                  key={index}
-                  onClick={() => {
-                    setStockCode(code);
-                    const symbolType = identifySymbolType(code);
-                    if (symbolType !== 'unknown') {
-                      setActiveTab(symbolType);
-                    }
-                  }}
-                  className="px-2 py-1 text-xs bg-gray-50 text-gray-600 rounded border hover:bg-gray-100 transition-colors"
+                  key={item.code}
+                  onClick={() => handleQuickSelect(item.code, activeTab)}
+                  className={`px-2 py-1 text-xs rounded transition-colors ${
+                    stockCode === item.code
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                  {code}
+                  {item.name}
                 </button>
               ))}
             </div>
           </div>
-        )}
-      </div>
 
-      {/* 股票/指数信息摘要 - 增强版 */}
-      {stockData && stockData.success && (
-        <div className="bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg p-4 mb-6 border border-gray-200">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
-            <div className="mb-4 lg:mb-0">
-              <div className="flex items-center mb-2">
-                <h3 className="text-lg font-semibold text-gray-900 mr-3">
-                  {stockData.name} ({stockData.code})
-                </h3>
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                  stockData.type === 'index' 
-                    ? 'bg-red-100 text-red-800' 
-                    : 'bg-blue-100 text-blue-800'
-                }`}>
-                  {stockData.type === 'index' ? '指数' : '股票'}
-                </span>
+          {/* 右列：日期选择和MA控制 */}
+          <div>
+            <div className="flex gap-2 mb-2">
+              <input
+                type="date"
+                value={dateRange.startDate}
+                onChange={handleDateRangeChange('startDate')}
+                className="input text-sm flex-1"
+              />
+              <span className="text-gray-500 text-sm self-center">至</span>
+              <input
+                type="date"
+                value={dateRange.endDate}
+                onChange={handleDateRangeChange('endDate')}
+                className="input text-sm flex-1"
+              />
+            </div>
+            {/* MA控制和快速日期 */}
+            <div className="flex items-center justify-between">
+              <div className="flex gap-2 text-xs">
+                {Object.entries(showMA).map(([key, value]) => (
+                  <label key={key} className="flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={value}
+                      onChange={(e) => setShowMA(prev => ({ ...prev, [key]: e.target.checked }))}
+                      className="mr-1 text-xs"
+                    />
+                    <span>{key}</span>
+                  </label>
+                ))}
               </div>
-              <div className="flex items-center text-sm text-gray-600">
-                <span className="mr-4">
-                  数据周期: {stockData.requestInfo?.period?.start} 至 {stockData.requestInfo?.period?.end}
-                </span>
-                <span>数据点数: {stockData.dataCount}个交易日</span>
+              <div className="flex gap-1">
+                {[30, 90].map((days) => (
+                  <button
+                    key={days}
+                    onClick={() => handlePresetDateRange(days)}
+                    className="btn btn-secondary text-xs px-2 py-1"
+                  >
+                    {days}天
+                  </button>
+                ))}
               </div>
             </div>
-            
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
-              <div className="text-center">
-                <div className="text-gray-600">最新{stockData.type === 'index' ? '点位' : '价格'}</div>
-                <div className="text-lg font-bold text-gray-900">
-                  {stockData.currentPrice?.toFixed(2)}{stockData.type === 'index' ? '点' : '元'}
+          </div>
+        </div>
+      </div>
+
+      {/* 股票信息摘要 - 简化显示 */}
+      {stockData && stockData.success && (
+        <div className="flex-shrink-0 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg p-3 mb-3 border border-gray-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-gray-900">
+                {stockData.name} ({stockData.code})
+              </h3>
+              <div className="text-xs text-gray-600">
+                {stockData.dataCount}个交易日 | {stockData.requestInfo?.period?.start} ~ {stockData.requestInfo?.period?.end}
+              </div>
+            </div>
+            <div className="grid grid-cols-4 gap-3 text-xs text-center">
+              <div>
+                <div className="text-gray-600">最新价</div>
+                <div className="font-bold text-gray-900">
+                  {realtimeData?.success && stockData.type === 'stock' ? 
+                    realtimeData.current_price?.toFixed(2) : 
+                    stockData.currentPrice?.toFixed(2)
+                  }
                 </div>
               </div>
-              <div className="text-center">
-                <div className="text-gray-600">期间涨跌幅</div>
-                <div className={`text-lg font-bold ${
-                  stockData.summary.changePercent > 0 ? 'price-up' : 
-                  stockData.summary.changePercent < 0 ? 'price-down' : 'price-neutral'
+              <div>
+                <div className="text-gray-600">涨跌幅</div>
+                <div className={`font-bold ${
+                  stockData.summary.changePercent > 0 ? 'text-red-600' : 
+                  stockData.summary.changePercent < 0 ? 'text-green-600' : 'text-gray-600'
                 }`}>
                   {stockData.summary.changePercent > 0 ? '+' : ''}{stockData.summary.changePercent}%
                 </div>
               </div>
-              <div className="text-center">
-                <div className="text-gray-600">最高点</div>
-                <div className="text-lg font-bold text-success-600">
-                  {stockData.summary.maxPrice?.toFixed(2)}
+              <div>
+                <div className="text-gray-600">最高</div>
+                <div className="font-bold text-red-600">
+                  {realtimeData?.success && stockData.type === 'stock' ? 
+                    realtimeData.high?.toFixed(2) : 
+                    stockData.summary.maxPrice?.toFixed(2)
+                  }
                 </div>
               </div>
-              <div className="text-center">
-                <div className="text-gray-600">最低点</div>
-                <div className="text-lg font-bold text-danger-600">
-                  {stockData.summary.minPrice?.toFixed(2)}
+              <div>
+                <div className="text-gray-600">最低</div>
+                <div className="font-bold text-green-600">
+                  {realtimeData?.success && stockData.type === 'stock' ? 
+                    realtimeData.low?.toFixed(2) : 
+                    stockData.summary.minPrice?.toFixed(2)
+                  }
                 </div>
               </div>
             </div>
@@ -633,8 +788,8 @@ const StockChart: React.FC<StockChartProps> = ({
         </div>
       )}
 
-      {/* 图表区域 - 增强版 */}
-      <div className="flex-1 relative">
+      {/* 图表区域 - 自适应高度 */}
+      <div ref={chartContainerRef} className="flex-1 relative min-h-0">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
@@ -643,13 +798,13 @@ const StockChart: React.FC<StockChartProps> = ({
             </div>
           </div>
         ) : stockData && stockData.success && stockData.data.length > 0 ? (
-          <div className="chart-container relative">
-            <Line data={chartData} options={chartOptions} />
-            
-            {/* 数据更新时间 */}
-            <div className="absolute top-2 right-2 text-xs text-gray-500 bg-white px-2 py-1 rounded shadow-sm">
-              数据更新: {stockData.lastUpdate ? new Date(stockData.lastUpdate).toLocaleString('zh-CN') : ''}
-            </div>
+          <div className="chart-container w-full h-full" style={{ height: `${containerHeight}px`, minHeight: '400px' }}>
+            <ReactEChartsCore
+              echarts={echarts}
+              option={chartOption}
+              style={{ height: '100%', width: '100%' }}
+              opts={{ renderer: 'canvas' }}
+            />
           </div>
         ) : (
           <div className="flex items-center justify-center h-full text-gray-500">
@@ -664,13 +819,10 @@ const StockChart: React.FC<StockChartProps> = ({
                   : `请输入有效的${activeTab === 'index' ? '指数代码' : '股票代码'}并选择日期范围`
                 }
               </p>
-              
-              {/* 格式提示 */}
               <div className="text-sm text-gray-400">
                 <p className="mb-1">
-                  {activeTab === 'stock' ? '股票代码格式：6位数字（如：000001）' : '指数代码格式：以.SH或.SZ结尾（如：000001.SH）'}
+                  {activeTab === 'stock' ? '股票代码：6位数字（如：000001）' : '指数代码：以.SH或.SZ结尾（如：000001.SH）'}
                 </p>
-                <p>或点击上方快速选择按钮</p>
               </div>
             </div>
           </div>

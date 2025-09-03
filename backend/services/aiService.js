@@ -272,8 +272,17 @@ class AIService {
             }
 
             console.log(`🤖 使用${this.provider}模型进行分析: ${model}`);
+            console.log(`🔗 API端点: ${client.baseURL}`);
+            console.log(`🔑 API密钥前缀: ${process.env.OPENAI_API_KEY ? process.env.OPENAI_API_KEY.substring(0, 10) + '...' : '未配置'}`);
 
-            const completion = await client.chat.completions.create({
+            // 添加请求超时控制，防止AI响应过慢
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => {
+                    reject(new Error(`AI请求超时（${this.provider}模型响应时间超过60秒）`));
+                }, 60000); // 60秒超时
+            });
+
+            const aiRequestPromise = client.chat.completions.create({
                 model: model,
                 messages: [
                     {
@@ -286,14 +295,23 @@ class AIService {
                     }
                 ],
                 max_tokens: maxTokens,
-                temperature: temperature,
-                top_p: 0.9,
-                frequency_penalty: 0.1,
-                presence_penalty: 0.1
+                temperature: temperature
+                // 移除gpt-5-nano不支持的参数
             });
+
+            // 使用Promise.race实现超时控制
+            const completion = await Promise.race([aiRequestPromise, timeoutPromise]);
+
+            console.log(`📝 收到API响应:`, JSON.stringify(completion, null, 2));
 
             // 检查响应结构
             if (!completion || !completion.choices || completion.choices.length === 0) {
+                console.error(`❌ 响应结构错误:`, {
+                    hasCompletion: !!completion,
+                    hasChoices: completion && !!completion.choices,
+                    choicesLength: completion && completion.choices ? completion.choices.length : 0,
+                    fullResponse: completion
+                });
                 throw new Error('空的API响应或无有效选择');
             }
 
